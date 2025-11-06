@@ -10,9 +10,14 @@ if (!accounts) {
   process.exit(1);
 }
 
-const [user, pass] = accounts.split(":").map(s => s.trim());
-if (!user || !pass) {
-  console.log('❌ 账号格式错误，应为 username:password');
+// 解析多个账号，支持逗号或分号分隔
+const accountList = accounts.split(/[,;]/).map(account => {
+  const [user, pass] = account.split(":").map(s => s.trim());
+  return { user, pass };
+}).filter(acc => acc.user && acc.pass);
+
+if (accountList.length === 0) {
+  console.log('❌ 账号格式错误，应为 username1:password1,username2:password2');
   process.exit(1);
 }
 
@@ -36,8 +41,8 @@ async function sendTelegram(message) {
   }
 }
 
-async function main() {
-  console.log(`开始登录账号: ${user}`);
+async function loginWithAccount(user, pass) {
+  console.log(`\n🚀 开始登录账号: ${user}`);
   
   const browser = await chromium.launch({ 
     headless: true,
@@ -49,56 +54,65 @@ async function main() {
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
     
-    console.log('正在访问网站...');
+    console.log(`📱 ${user} - 正在访问网站...`);
     await page.goto('https://www.netlib.re/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(3000);
     
-    console.log('点击登录按钮...');
+    console.log(`🔑 ${user} - 点击登录按钮...`);
     await page.click('text=Login', { timeout: 5000 });
-    
-    // 如果上面失败，可以尝试其他方法
-    // 方法2: 通过XPath查找
-    // await page.click('//a[contains(text(), "Login")]', { timeout: 5000 });
-    
-    // 方法3: 通过CSS选择器查找
-    // await page.click('a[href*="login"]', { timeout: 5000 });
     
     await page.waitForTimeout(2000);
     
-    console.log('填写用户名...');
-    // 使用更通用的选择器
+    console.log(`📝 ${user} - 填写用户名...`);
     await page.fill('input[name="username"], input[type="text"]', user);
     await page.waitForTimeout(1000);
     
-    console.log('填写密码...');
+    console.log(`🔒 ${user} - 填写密码...`);
     await page.fill('input[name="password"], input[type="password"]', pass);
     await page.waitForTimeout(1000);
     
-    console.log('提交登录...');
+    console.log(`📤 ${user} - 提交登录...`);
     await page.click('button:has-text("Validate"), input[type="submit"]');
     
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(5000);
     
+    // 检查登录是否成功
     const pageContent = await page.content();
+    
     if (pageContent.includes('exclusive owner') || pageContent.includes(user)) {
-      console.log('✅ 登录成功');
+      console.log(`✅ ${user} - 登录成功`);
       await sendTelegram(`✅ ${user} 登录成功`);
     } else {
-      console.log('❌ 登录失败');
-      const errorText = await page.textContent('body');
-      const errorSnippet = errorText.includes('Error') ? 
-        errorText.match(/Error[^\.]*\.?/)?.[0] || '未知错误' : '未知错误';
-      await sendTelegram(`❌ ${user} 登录失败: ${errorSnippet}`);
+      console.log(`❌ ${user} - 登录失败`);
+      await sendTelegram(`❌ ${user} 登录失败`);
     }
     
   } catch (e) {
-    console.log(`❌ 登录异常: ${e.message}`);
+    console.log(`❌ ${user} - 登录异常: ${e.message}`);
     await sendTelegram(`❌ ${user} 登录异常: ${e.message}`);
   } finally {
     if (page) await page.close();
     await browser.close();
   }
+}
+
+async function main() {
+  console.log(`🔍 发现 ${accountList.length} 个账号需要登录`);
+  
+  for (let i = 0; i < accountList.length; i++) {
+    const { user, pass } = accountList[i];
+    console.log(`\n📋 处理第 ${i + 1}/${accountList.length} 个账号: ${user}`);
+    
+    await loginWithAccount(user, pass);
+    
+    if (i < accountList.length - 1) {
+      console.log('⏳ 等待3秒后处理下一个账号...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
+  
+  console.log('\n✅ 所有账号处理完成！');
 }
 
 main().catch(console.error);
